@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabaseServer';
+import { sendDeliverooSyncStatus } from '@/lib/deliveroo';
 
 export async function POST(request: Request) {
   try {
@@ -29,6 +30,9 @@ export async function POST(request: Request) {
       order.subtotal?.currency ||
       'GBP';
 
+      const toPounds = (money?: { fractional: number; currency_code: string }) =>
+        typeof money?.fractional === 'number' ? money.fractional / 100 : null;
+      
     const row = {
       platform: 'deliveroo',
       external_order_id: order.id,
@@ -67,6 +71,26 @@ export async function POST(request: Request) {
     }
 
     console.log('Supabase upsert success for order', order.id);
+
+    // Send sync status to Deliveroo if this is a status update and order is accepted
+    if (payload.event === 'order.status_update') {
+      const isAccepted =
+        order.status === 'accepted' ||
+        (Array.isArray(order.status_log) &&
+          order.status_log.some((log: any) => log.status === 'accepted'));
+
+      if (isAccepted) {
+        try {
+          await sendDeliverooSyncStatus(order.id);
+        } catch (error) {
+          // Log error but don't break the webhook response
+          console.error(
+            `Failed to send Deliveroo sync status for order ${order.id}:`,
+            error
+          );
+        }
+      }
+    }
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
