@@ -3,6 +3,7 @@ import { supabaseServer } from '@/lib/supabaseServer';
 import { sendDeliverooSyncStatus } from '@/lib/deliveroo';
 
 export async function POST(request: Request) {
+  console.log('*** Deliveroo webhook HIT ***');
   try {
     const payload = await request.json();
 
@@ -11,6 +12,8 @@ export async function POST(request: Request) {
       payload.event,
       payload.body?.order?.id,
     );
+
+    console.log('Full Deliveroo payload:', JSON.stringify(payload, null, 2));
 
     if (!payload.body || !payload.body.order) {
       console.warn('Webhook payload missing body.order, ignoring');
@@ -74,22 +77,39 @@ export async function POST(request: Request) {
 
     // Send sync status to Deliveroo if this is a status update and order is accepted
     if (payload.event === 'order.status_update') {
+      console.log('Received order.status_update event for order', order.id);
+      console.log('Order status:', order.status);
+      console.log('Order status_log:', order.status_log);
+
       const isAccepted =
         order.status === 'accepted' ||
         (Array.isArray(order.status_log) &&
           order.status_log.some((log: any) => log.status === 'accepted'));
 
+      console.log('Is order accepted?', isAccepted);
+
       if (isAccepted) {
         try {
+          console.log('Calling sendDeliverooSyncStatus for order', order.id);
           await sendDeliverooSyncStatus(order.id);
+          console.log(
+            'sendDeliverooSyncStatus completed successfully for order',
+            order.id,
+          );
         } catch (error) {
-          // Log error but don't break the webhook response
           console.error(
             `Failed to send Deliveroo sync status for order ${order.id}:`,
-            error
+            error,
           );
         }
+      } else {
+        console.log(
+          'Not sending sync_status because order is not accepted. Current status:',
+          order.status,
+        );
       }
+    } else {
+      console.log('Non-status_update event received:', payload.event);
     }
 
     return NextResponse.json({ success: true }, { status: 200 });

@@ -53,7 +53,14 @@ export async function sendDeliverooSyncStatus(orderId: string): Promise<void> {
     return;
   }
 
+  console.log('[Deliveroo] Preparing to send sync_status for order', orderId);
+
   const token = await getDeliverooAccessToken();
+
+  console.log(
+    '[Deliveroo] Got access token, sending sync_status for order',
+    orderId,
+  );
 
   const url = `${DELIVEROO_ORDERS_BASE}/orders/${encodeURIComponent(
     orderId,
@@ -70,6 +77,11 @@ export async function sendDeliverooSyncStatus(orderId: string): Promise<void> {
       status: 'succeeded',
     }),
   });
+
+  console.log(
+    '[Deliveroo] sync_status response status:',
+    res.status,
+  );
 
   // 409 = sync_status already set; that's fine in our case.
   if (!res.ok && res.status !== 409) {
