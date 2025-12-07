@@ -1,74 +1,86 @@
-/**
- * Deliveroo API helper functions
- */
+// lib/deliveroo.ts
+
+const DELIVEROO_AUTH_URL =
+  'https://api.developers.deliveroo.com/auth/token';
+
+const DELIVEROO_ORDERS_BASE =
+  'https://api.developers.deliveroo.com/order/v1';
 
 /**
- * Get Deliveroo access token using client credentials flow
+ * Get an access token from Deliveroo using client_credentials.
  */
-export async function getDeliverooAccessToken(): Promise<string> {
+async function getDeliverooAccessToken(): Promise<string> {
   const clientId = process.env.DELIVEROO_CLIENT_ID;
   const clientSecret = process.env.DELIVEROO_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    throw new Error('DELIVEROO_CLIENT_ID or DELIVEROO_CLIENT_SECRET not set');
+    console.error(
+      'Missing DELIVEROO_CLIENT_ID or DELIVEROO_CLIENT_SECRET env vars',
+    );
+    throw new Error('Deliveroo credentials not configured');
   }
 
-  const response = await fetch('https://api.developers.deliveroo.com/auth/token', {
+  const res = await fetch(DELIVEROO_AUTH_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
+      grant_type: 'client_credentials',
       client_id: clientId,
       client_secret: clientSecret,
-      grant_type: 'client_credentials',
-    }).toString(),
+      scope: 'orders',
+    }),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to get Deliveroo access token: ${response.status} ${errorText}`);
+  if (!res.ok) {
+    const text = await res.text();
+    console.error('Deliveroo OAuth failed:', res.status, text);
+    throw new Error(`Deliveroo OAuth failed: ${res.status}`);
   }
 
-  const data = await response.json();
-  return data.access_token;
+  const data = await res.json();
+  return data.access_token as string;
 }
 
 /**
- * Send sync status to Deliveroo for an order
- * @param orderId - The Deliveroo order ID
+ * Notify Deliveroo that our internal handling of the order has succeeded.
+ * This is what closes the Sandbox test ("sync_status not called").
  */
 export async function sendDeliverooSyncStatus(orderId: string): Promise<void> {
-  const accessToken = await getDeliverooAccessToken();
-
-  const response = await fetch(
-    `https://api.developers.deliveroo.com/order/v1/orders/${orderId}/sync_status`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        occurred_at: new Date().toISOString(),
-        status: 'succeeded',
-      }),
-    }
-  );
-
-  // Ignore 409 (Conflict) errors
-  if (response.status === 409) {
-    console.log(`Deliveroo sync status 409 (already sent) for order ${orderId}`);
+  if (!orderId) {
+    console.error('sendDeliverooSyncStatus called without orderId');
     return;
   }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Failed to send Deliveroo sync status: ${response.status} ${errorText}`
+  const token = await getDeliverooAccessToken();
+
+  const url = `${DELIVEROO_ORDERS_BASE}/orders/${encodeURIComponent(
+    orderId,
+  )}/sync_status`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      occurred_at: new Date().toISOString(),
+      status: 'succeeded',
+    }),
+  });
+
+  // 409 = sync_status already set; that's fine in our case.
+  if (!res.ok && res.status !== 409) {
+    const text = await res.text();
+    console.error(
+      `Deliveroo sync_status failed for ${orderId}:`,
+      res.status,
+      text,
     );
+    throw new Error(`Deliveroo sync_status failed: ${res.status}`);
   }
 
-  console.log(`Deliveroo sync status sent successfully for order ${orderId}`);
+  console.log(`Deliveroo sync_status sent for order ${orderId}`);
 }
-
